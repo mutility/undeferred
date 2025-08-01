@@ -90,6 +90,18 @@ func toVarAny() (err error) {
 	return
 }
 
+func toAnyNested() (err error) {
+	func() (err error) {
+		defer takesAny(err) // want `defer captures current value of named result 'err'`
+		return
+	}()
+	func() (noerr error) {
+		defer takesAny(err) // want `defer captures current value of named result 'err'`
+		return
+	}()
+	return
+}
+
 var globalErr error
 
 func mayErr() error        { return globalErr }
@@ -109,4 +121,5 @@ var _ = func() {
 	toVarExact()
 	toAny()
 	toVarAny()
+	toAnyNested()
 }

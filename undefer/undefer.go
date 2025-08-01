@@ -6,7 +6,7 @@ package undefer
 
 import (
 	"go/ast"
-	"go/types"
+	"slices"
 
 	"golang.org/x/tools/go/analysis"
 	"golang.org/x/tools/go/analysis/passes/inspect"
@@ -42,36 +42,43 @@ func Analyzer() *undeferAnalyzer {
 
 func (v *undeferAnalyzer) run(pass *analysis.Pass) (any, error) {
 	inspect := pass.ResultOf[inspect.Analyzer].(*inspector.Inspector)
-	results := make(map[types.Object]struct{})
-	inspect.Preorder([]ast.Node{new(ast.FuncType), new(ast.DeferStmt)}, func(n ast.Node) {
-		if f, ok := n.(*ast.FuncType); ok {
-			clear(results)
-			if f.Results == nil {
-				return
-			}
-			for _, a := range f.Results.List {
-				for _, n := range a.Names {
-					if o := pass.TypesInfo.Defs[n]; o != nil {
-						results[o] = struct{}{}
-					}
-				}
-			}
-			return
-		}
-		if len(results) == 0 {
-			return
+	inspect.WithStack([]ast.Node{new(ast.DeferStmt)}, func(n ast.Node, push bool, stack []ast.Node) (proceed bool) {
+		if !push {
+			return true
 		}
 		d := n.(*ast.DeferStmt)
 		for _, a := range d.Call.Args {
 			switch a := a.(type) {
 			case *ast.Ident:
 				if obj := pass.TypesInfo.Uses[a]; obj != nil {
-					if _, ok := results[obj]; ok {
+					if slices.ContainsFunc(stack, func(n ast.Node) bool {
+						if f := funcOf(n); f != nil && f.Results != nil {
+							return slices.ContainsFunc(f.Results.List, func(r *ast.Field) bool {
+								return slices.ContainsFunc(r.Names, func(id *ast.Ident) bool {
+									return pass.TypesInfo.Defs[id] == obj
+								})
+							})
+						}
+						return false
+					}) {
 						pass.Reportf(a.Pos(), "defer captures current value of named result '%s'", a.Name)
 					}
 				}
 			}
 		}
+		return true
 	})
 	return nil, nil
+}
+
+func funcOf(n ast.Node) *ast.FuncType {
+	switch n := n.(type) {
+	case *ast.FuncDecl:
+		return n.Type
+	case *ast.FuncType:
+		return n
+	case *ast.FuncLit:
+		return n.Type
+	}
+	return nil
 }
