@@ -6,7 +6,7 @@ package undefer
 
 import (
 	"go/ast"
-	"slices"
+	"go/types"
 
 	"golang.org/x/tools/go/analysis"
 	"golang.org/x/tools/go/analysis/passes/inspect"
@@ -41,33 +41,76 @@ func Analyzer() *undeferAnalyzer {
 }
 
 func (v *undeferAnalyzer) run(pass *analysis.Pass) (any, error) {
+	referredShadows := map[types.Object]struct{}{}
+	resultNames := map[string][]types.Object{}
+	resultObjs := map[types.Object]struct{}{}
 	inspect := pass.ResultOf[inspect.Analyzer].(*inspector.Inspector)
-	inspect.WithStack([]ast.Node{new(ast.DeferStmt)}, func(n ast.Node, push bool, stack []ast.Node) (proceed bool) {
-		if !push {
-			return true
-		}
-		d := n.(*ast.DeferStmt)
-		for _, a := range d.Call.Args {
-			switch a := a.(type) {
-			case *ast.Ident:
-				if obj := pass.TypesInfo.Uses[a]; obj != nil {
-					if slices.ContainsFunc(stack, func(n ast.Node) bool {
-						if f := funcOf(n); f != nil && f.Results != nil {
-							return slices.ContainsFunc(f.Results.List, func(r *ast.Field) bool {
-								return slices.ContainsFunc(r.Names, func(id *ast.Ident) bool {
-									return pass.TypesInfo.Defs[id] == obj
-								})
-							})
+	inspect.WithStack(
+		[]ast.Node{new(ast.FuncDecl), new(ast.FuncLit), new(ast.DeferStmt), new(ast.Ident)},
+		func(n ast.Node, push bool, stack []ast.Node) (proceed bool) {
+			// update known result names/objs
+			if f := funcOf(n); f != nil && f.Results != nil {
+				for _, r := range f.Results.List {
+					for _, id := range r.Names {
+						o := pass.TypesInfo.Defs[id]
+						named := resultNames[o.Name()]
+						if push {
+							resultNames[o.Name()] = append(named, o)
+							resultObjs[o] = struct{}{}
+						} else {
+							resultNames[o.Name()] = named[:len(named)-1]
+							delete(resultObjs, o)
 						}
-						return false
-					}) {
-						pass.Reportf(a.Pos(), "defer captures current value of named result '%s'", a.Name)
 					}
 				}
 			}
-		}
-		return true
-	})
+			switch n := n.(type) {
+			// check for use of named result directly in defer's call
+			case *ast.DeferStmt:
+				if !push {
+					return true
+				}
+				for _, a := range n.Call.Args {
+					switch a := a.(type) {
+					case *ast.Ident:
+						if _, ok := resultObjs[pass.TypesInfo.Uses[a]]; ok {
+							pass.Reportf(a.Pos(), "defer captures current value of named result '%s'", a.Name)
+						}
+					}
+				}
+			// check for use of shadows matching a named result in a deferred func
+			case *ast.Ident:
+				deferStmt := closest[*ast.DeferStmt](stack)
+				if deferStmt < 0 ||
+					(deferStmt > closest[*ast.FuncDecl](stack) && deferStmt > closest[*ast.FuncLit](stack)) {
+					return // don't consider ids outside a defer, or arguments to a defer
+				}
+				if o := pass.TypesInfo.Uses[n]; o != nil && push {
+					if _, ok := resultObjs[o]; ok {
+						return true // refers to the named return value; that's fine
+					}
+					for _, n := range stack[deferStmt+1:] {
+						if scope := pass.TypesInfo.Scopes[n]; scope != nil && scope.Lookup(o.Name()) == o {
+							return true // ignore references to ids defined within the defer func
+						}
+					}
+					if scope := pass.TypesInfo.Scopes[funcOf(stack[deferStmt].(*ast.DeferStmt).Call.Fun)]; scope != nil {
+						if scope.Lookup(o.Name()) == o {
+							return true
+						}
+					}
+					if _, ok := resultNames[o.Name()]; ok {
+						pass.Reportf(n.Pos(), "defer references shadow of named result '%s'", o.Name())
+						if _, ok := referredShadows[o]; !ok {
+							pass.Reportf(o.Pos(), "shadows named result '%s' referenced in later defer", o.Name())
+							referredShadows[o] = struct{}{}
+						}
+					}
+				}
+				return true
+			}
+			return true
+		})
 	return nil, nil
 }
 
@@ -81,4 +124,13 @@ func funcOf(n ast.Node) *ast.FuncType {
 		return n.Type
 	}
 	return nil
+}
+
+func closest[T ast.Node](stack []ast.Node) int {
+	for i := len(stack) - 1; i > 0; i-- {
+		if _, ok := stack[i].(T); ok {
+			return i
+		}
+	}
+	return -1
 }
