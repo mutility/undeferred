@@ -99,7 +99,7 @@ func (v *undeferAnalyzer) run(pass *analysis.Pass) (any, error) {
 							return true
 						}
 					}
-					if _, ok := resultNames[o.Name()]; ok {
+					if objs := resultNames[o.Name()]; len(objs) > 0 {
 						pass.Reportf(n.Pos(), "defer references shadow of named result '%s'", o.Name())
 						if _, ok := referredShadows[o]; !ok {
 							pass.Reportf(o.Pos(), "shadows named result '%s' referenced in later defer", o.Name())

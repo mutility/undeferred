@@ -140,6 +140,13 @@ func nesting() (err error) {
 	return
 }
 
+func noNames() {
+	err := mayErr()
+	defer func() error {
+		return err
+	}()
+}
+
 var globalErr error
 
 func mayErr() error        { return globalErr }
