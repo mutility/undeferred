@@ -56,8 +56,7 @@ library use by setting fields on `undefer.Analyzer()`.
 
 Flag | Field | Meaning
 -|-|-
-`-exact` | ExactTypeOnly | Suppress reports of mismatched parameters of mismatching types
-`-gen` | IncludeGeneratedFiles | Include reports from generated files
+`-shadow` | ReferencedShadows | Report references to shadowed named results (default: true)
 
 ## Bug reports and feature contributions
 

@@ -20,8 +20,7 @@ the results of crossing your parameters can be disastrous.`
 
 type undeferAnalyzer struct {
 	*analysis.Analyzer
-	ExactTypeOnly         bool
-	IncludeGeneratedFiles bool
+	ReferencedShadows bool
 }
 
 func Analyzer() *undeferAnalyzer {
@@ -32,8 +31,7 @@ func Analyzer() *undeferAnalyzer {
 			Requires: []*analysis.Analyzer{inspect.Analyzer},
 		},
 	}
-	a.Flags.BoolVar(&a.ExactTypeOnly, "exact", false, "suppress undefer reports when types aren't an exact match")
-	a.Flags.BoolVar(&a.IncludeGeneratedFiles, "gen", false, "include reports from generated files")
+	a.Flags.BoolVar(&a.ReferencedShadows, "shadow", true, "report defer's references to shadowed named results")
 
 	a.Run = a.run
 
@@ -80,6 +78,9 @@ func (v *undeferAnalyzer) run(pass *analysis.Pass) (any, error) {
 				}
 			// check for use of shadows matching a named result in a deferred func
 			case *ast.Ident:
+				if !v.ReferencedShadows {
+					return true
+				}
 				deferStmt := closest[*ast.DeferStmt](stack)
 				if deferStmt < 0 ||
 					(deferStmt > closest[*ast.FuncDecl](stack) && deferStmt > closest[*ast.FuncLit](stack)) {
