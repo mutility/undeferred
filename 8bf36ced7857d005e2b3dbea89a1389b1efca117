@@ -1,0 +1,13 @@
+all:
+mutility/undeferred 59 56
+mod:
+github.com/mutility/undeferred 59 56
+root:
+github.com/mutility/undeferred 2 0
+github.com/mutility/undeferred/undefer 57 56
+pkg:
+github.com/mutility/undeferred 2 0
+github.com/mutility/undeferred/undefer 57 56
+file:
+github.com/mutility/undeferred/main.go 2 0
+github.com/mutility/undeferred/undefer/undefer.go 57 56
